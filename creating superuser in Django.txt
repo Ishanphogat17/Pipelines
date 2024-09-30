@@ -1,0 +1,49 @@
+creating superuser in Django
+
+1. create a Django project:-
+   django-admin startproject myproject
+   cd myproject
+
+2. create a Django app:- 
+   python manage.py startapp myapp
+
+3. definte your model:
+   In myapp/models.py, 
+
+   from django.db import models
+
+    class Item(models.Model):
+    name = models.CharField(max_length=100)
+    description = models.TextField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return self.name
+4. Register Your App
+Add your app to the INSTALLED_APPS list in myproject/settings.py:
+
+INSTALLED_APPS = [
+    ...,
+    'myapp',
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+]
+
+5. Create the Admin Interface
+In myapp/admin.py, register your models with the admin site:
+from django.contrib import admin
+from .models import Item
+
+admin.site.register(Item)
+
+6. run these commands
+python manage.py makemigrations
+python manage.py migrate
+
+7. create a superuser:
+python manage.py createsuperuser
+

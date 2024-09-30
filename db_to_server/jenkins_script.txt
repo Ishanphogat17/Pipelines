@@ -1,0 +1,66 @@
+pipeline {
+    agent any
+
+    environment {
+        DB_SERVER = 'db_server_ip_or_hostname'
+        DB_USER = 'db_user'
+        APP_SERVER = 'app_server_ip_or_hostname'
+        APP_USER = 'app_user'
+        CREDENTIALS_ID = 'jenkins-ssh'  // ID of your SSH credentials in Jenkins
+
+        // Define the mapping of files to target directories
+        FILES_TO_TRANSFER = '''path/to/file1:/path/to/target/directory1
+path/to/file2:/path/to/target/directory2
+path/to/file3:/path/to/target/directory3'''
+    }
+
+    stages {
+        stage('Prepare Workspace') {
+            steps {
+                script {
+                    // Create the shell script in the workspace
+                    writeFile file: 'transfer_files.sh', text: """
+#!/bin/bash
+
+# Variables
+DB_SERVER="${env.DB_SERVER}"
+DB_USER="${env.DB_USER}"
+APP_SERVER="${env.APP_SERVER}"
+APP_USER="${env.APP_USER}"
+
+# Define the mapping of files to target directories
+declare -A FILES_TO_TRANSFER=(
+    $(for mapping in ${env.FILES_TO_TRANSFER.split('\n')}; do
+        FILE=$(echo $mapping | cut -d ':' -f 1)
+        TARGET_DIR=$(echo $mapping | cut -d ':' -f 2)
+        echo "[\\"$FILE\\"]=\\"$TARGET_DIR\\"]"
+    done)
+)
+
+# Transfer files
+for FILE in "${!FILES_TO_TRANSFER[@]}"
+do
+    TARGET_DIR="\${FILES_TO_TRANSFER[\$FILE]}"
+    scp "\$DB_USER@\$DB_SERVER:\$FILE" "\$APP_USER@\$APP_SERVER:\$TARGET_DIR"
+done
+"""
+                    // Make the script executable
+                    sh 'chmod +x transfer_files.sh'
+                }
+            }
+        }
+
+        stage('Transfer Files') {
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(credentialsId: env.CREDENTIALS_ID, keyFileVariable: 'SSH_KEY')]) {
+                        sh """
+                            export SSH_PRIVATE_KEY=\$(cat \$SSH_KEY)
+                            ./transfer_files.sh
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

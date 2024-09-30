@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Define SSH connection parameters
+DB_SERVER="db_server_ip_or_hostname"
+DB_USER="db_user"
+DB_PASSWORD="db_password"
+
+APP_SERVER="app_server_ip_or_hostname"
+APP_USER="app_user"
+APP_PASSWORD="app_password"
+
+# Define the mapping of files to target directories
+declare -A FILES_TO_TRANSFER=(
+    ["/path/to/file1"]="/path/to/target/directory1"
+    ["/path/to/file2"]="/path/to/target/directory1"
+    ["/path/to/file3"]="/path/to/target/directory2"
+    ["/path/to/file4"]="/path/to/target/directory3"
+    ["/path/to/file5"]= "/path/to/target/directory3"
+)
+
+# Function to transfer files
+transfer_files() {
+    local source_file="$1"
+    local target_dir="$2"
+
+    # Transfer file from DB server to App server
+    sshpass -p "$DB_PASSWORD" ssh -o StrictHostKeyChecking=no $DB_USER@$DB_SERVER "sshpass -p '$APP_PASSWORD' scp -o StrictHostKeyChecking=no $source_file $APP_USER@$APP_SERVER:$target_dir"
+}
+
+# Transfer files
+for source_file in "${!FILES_TO_TRANSFER[@]}"; do
+    target_dir="${FILES_TO_TRANSFER[$source_file]}"
+    transfer_files "$source_file" "$target_dir"
+done

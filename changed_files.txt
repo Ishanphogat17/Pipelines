@@ -1,0 +1,94 @@
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = '3.109.188.102'
+        REMOTE_USER = 'ishan'
+        CREDENTIALS_ID = 'jenkins-ssh'
+        GITHUB_REPO = 'https://github.com/Ishansk17/project_chat_application.git'
+        REPO_DIR = '/home/ishan/frontend'
+        BRANCH = 'master'
+        LAST_SUCCESSFUL_COMMIT = ''
+    }
+    stages {
+        stage('Checkout Repository') {
+            steps {
+                script {
+                    checkout([$class: 'GitSCM', 
+                        branches: [[name: "*/${BRANCH}"]], 
+                        userRemoteConfigs: [[url: GITHUB_REPO]],
+                        extensions: [[$class: 'CleanBeforeCheckout']]
+                    ])
+                }
+            }
+        }
+        stage('Get Last Successful Commit') {
+            steps {
+                script {
+                    // Retrieve the last successful commit from a file on the remote server
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        def result = sh(script: """
+                            sshpass -p "\$PASSWORD" ssh -o StrictHostKeyChecking=no \$REMOTE_USER@\$REMOTE_HOST "cat ${REPO_DIR}/.last_successful_commit 2>/dev/null || echo ''"
+                        """, returnStdout: true).trim()
+                        LAST_SUCCESSFUL_COMMIT = result
+                    }
+                    echo "Last successful commit: ${LAST_SUCCESSFUL_COMMIT}"
+                }
+            }
+        }
+        stage('Sync Changed Files') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        // Get list of changed files
+                        def changedFiles = sh(script: """
+                            if [ -z "${LAST_SUCCESSFUL_COMMIT}" ]; then
+                                git ls-files
+                            else
+                                git diff --name-only ${LAST_SUCCESSFUL_COMMIT} HEAD
+                            fi
+                        """, returnStdout: true).trim()
+
+                        if (changedFiles) {
+                            echo "Changed files:"
+                            echo changedFiles
+
+                            // Create a tar of changed files
+                            sh "tar -czf changed_files.tar.gz ${changedFiles}"
+
+                            // Copy the tar file to the remote server
+                            sh "sshpass -p \"\$PASSWORD\" scp -o StrictHostKeyChecking=no changed_files.tar.gz \$REMOTE_USER@\$REMOTE_HOST:${REPO_DIR}/"
+
+                            // Extract the tar file on the remote server
+                            sh """
+                                sshpass -p "\$PASSWORD" ssh -o StrictHostKeyChecking=no \$REMOTE_USER@\$REMOTE_HOST "
+                                    cd ${REPO_DIR}
+                                    tar -xzf changed_files.tar.gz
+                                    rm changed_files.tar.gz
+                                "
+                            """
+
+                            // Clean up local tar file
+                            sh "rm changed_files.tar.gz"
+
+                            // Update the last successful commit on the remote server
+                            def currentCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+                            sh """
+                                sshpass -p "\$PASSWORD" ssh -o StrictHostKeyChecking=no \$REMOTE_USER@\$REMOTE_HOST "echo '${currentCommit}' > ${REPO_DIR}/.last_successful_commit"
+                            """
+                        } else {
+                            echo "No files have changed."
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

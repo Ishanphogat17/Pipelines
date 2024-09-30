@@ -1,0 +1,110 @@
+pipeline {
+    agent any
+
+    environment {
+        RDS_HOST = 'your-rds-endpoint.rds.amazonaws.com'
+        RDS_PORT = '3306'
+        RDS_DATABASE = 'your_database_name'
+        RDS_USER = 'your_rds_user'
+        RDS_PASSWORD_CRED = 'rds-password-credential-id' // Jenkins credential ID for RDS password
+        EXCEL_FILES_DIR = '/path/to/your/excel/files/directory'
+        AWS_REGION = 'your-aws-region' // e.g., 'us-west-2'
+    }
+
+    stages {
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    pip install pandas openpyxl sqlalchemy pymysql boto3
+                '''
+            }
+        }
+
+        stage('Process Excel Files and Create Tables') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: "${RDS_PASSWORD_CRED}", variable: 'RDS_PASSWORD')]) {
+                        sh '''
+                            python3 - << EOF
+import pandas as pd
+from sqlalchemy import create_engine
+import os
+import re
+import boto3
+
+def sanitize_table_name(name):
+    name = os.path.splitext(name)[0]
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+# Create RDS connection
+engine = create_engine(f"mysql+pymysql://${RDS_USER}:{RDS_PASSWORD}@${RDS_HOST}:${RDS_PORT}/${RDS_DATABASE}")
+
+# Process each Excel file in the directory
+for filename in os.listdir("${EXCEL_FILES_DIR}"):
+    if filename.endswith(('.xlsx', '.xls')):
+        file_path = os.path.join("${EXCEL_FILES_DIR}", filename)
+        table_name = sanitize_table_name(filename)
+        
+        print(f"Processing file: {filename}")
+        
+        # Read the Excel file
+        df = pd.read_excel(file_path)
+        
+        # Write to RDS
+        df.to_sql(table_name, engine, if_exists='replace', index=False)
+        
+        print(f"Table {table_name} created successfully in RDS!")
+
+print("All Excel files processed and tables created in RDS.")
+EOF
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Verify Table Creation') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: "${RDS_PASSWORD_CRED}", variable: 'RDS_PASSWORD')]) {
+                        def tables = sh(script: """
+                            python3 - << EOF
+import os
+import re
+
+def sanitize_table_name(name):
+    name = os.path.splitext(name)[0]
+    return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
+for filename in os.listdir("${EXCEL_FILES_DIR}"):
+    if filename.endswith(('.xlsx', '.xls')):
+        print(sanitize_table_name(filename))
+EOF
+                        """, returnStdout: true).trim().split('\n')
+
+                        tables.each { table ->
+                            def tableExists = sh(script: """
+                                mysql -h ${RDS_HOST} -P ${RDS_PORT} -u ${RDS_USER} -p${RDS_PASSWORD} -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${RDS_DATABASE}' AND table_name = '${table}';" ${RDS_DATABASE} | tail -n 1
+                            """, returnStdout: true).trim()
+
+                            if (tableExists == "1") {
+                                echo "Table ${table} created successfully in RDS database ${RDS_DATABASE}"
+                            } else {
+                                error "Failed to create table ${table} in RDS database ${RDS_DATABASE}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

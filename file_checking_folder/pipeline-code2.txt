@@ -1,0 +1,51 @@
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = '3.109.188.102'
+        REMOTE_USER = 'ishan'
+        CREDENTIALS_ID = 'jenkins-ssh'
+        REMOTE_DIR = "/home/ishan/frontend3"
+        // Add a list of expected files/folders, separated by spaces
+        EXPECTED_CONTENTS = "README.md client server testing"
+    }
+    stages {
+        stage('Verify Directory Contents on Remote Server') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASSWORD')]) {
+                        sh """
+                            echo "Verifying directory contents of: \$REMOTE_DIR"
+                            
+                            # Check if directory exists
+                            if ! sshpass -p \$PASSWORD ssh -o StrictHostKeyChecking=no \$USER@\$REMOTE_HOST "[ -d \$REMOTE_DIR ]"; then
+                                echo "Error: Directory \$REMOTE_DIR does not exist on the remote server."
+                                exit 1
+                            fi
+                            
+                            # Get actual contents
+                            ACTUAL_CONTENTS=\$(sshpass -p \$PASSWORD ssh -o StrictHostKeyChecking=no \$USER@\$REMOTE_HOST "ls -1 \$REMOTE_DIR | sort | tr '\\n' ' ' | sed 's/ \$//'")
+                            EXPECTED_CONTENTS_SORTED=\$(echo "\$EXPECTED_CONTENTS" | tr ' ' '\\n' | sort | tr '\\n' ' ' | sed 's/ \$//')
+                            
+                            if [ "\$ACTUAL_CONTENTS" = "\$EXPECTED_CONTENTS_SORTED" ]; then
+                                echo "Directory contents match expected contents."
+                            else
+                                echo "Directory contents do not match expected contents."
+                                echo "Expected: \$EXPECTED_CONTENTS_SORTED"
+                                echo "Actual: \$ACTUAL_CONTENTS"
+                                exit 1
+                            fi
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Directory contents verified successfully on remote server."
+        }
+        failure {
+            echo "Directory verification failed on remote server."
+        }
+    }
+}

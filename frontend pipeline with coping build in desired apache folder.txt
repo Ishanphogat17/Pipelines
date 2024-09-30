@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = 'newdevtest.skewb.ai'
+        REMOTE_USER = 'uiteam'
+        SSH_CREDENTIALS_ID = 'newdevtest-ssh'
+        PAT_CREDENTIALS_ID = 'github-token'
+        SUDO_PASSWORD_ID = 'new-product-uiteam-ssh'
+        GITHUB_REPO = 'https://github.com/Rahul2282/mmm.git'
+        REPO_DIR = '/var/www/html/'
+    }
+    parameters {
+        string(name: 'BRANCH_NAME', defaultValue: 'main', description: 'Git branch to build')
+    }
+    stages {
+        stage('Setup and Deploy') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: PAT_CREDENTIALS_ID, variable: 'PAT'),
+                        usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')
+                    ]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} <<EOF
+set -e
+echo "Connected to \$(hostname) as \$(whoami)"
+
+# Install Apache if not installed
+if ! command -v apache2 &> /dev/null; then
+    echo "Apache not found. Installing Apache..."
+    echo "${SUDO_PASS}" | sudo -S apt-get update
+    echo "${SUDO_PASS}" | sudo -S apt-get install -y apache2
+fi
+
+# Ensure REPO_DIR exists and set permissions
+echo "${SUDO_PASS}" | sudo -S mkdir -p "${REPO_DIR}"
+echo "${SUDO_PASS}" | sudo -S chown -R ${REMOTE_USER}:${REMOTE_USER} "${REPO_DIR}"
+
+# Setup Git
+git config --global credential.helper store
+echo "https://${PAT}:@github.com" > ~/.git-credentials
+
+# Clone or update repository
+if [ -d "${REPO_DIR}/.git" ]; then
+    echo "Updating existing repository..."
+    cd "${REPO_DIR}"
+    git fetch origin
+    git reset --hard origin/${BRANCH_NAME}
+else
+    echo "Cloning repository..."
+    git clone -b "${BRANCH_NAME}" "${GITHUB_REPO}" "${REPO_DIR}"
+    cd "${REPO_DIR}"
+fi
+EOF
+'''
+                    }
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+set -e
+cd "${REPO_DIR}"
+# Install dependencies (example for Node.js project)
+if [ -f "package.json" ]; then
+    echo "Installing Node.js dependencies..."
+    npm install
+fi
+EOF
+'''
+                    }
+                }
+            }
+        }
+        stage('Build Project') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+set -e
+cd "${REPO_DIR}"
+# Build project (example for Node.js project)
+if [ -f "package.json" ]; then
+    echo "Building Node.js project..."
+    npm run build
+fi
+
+# Ensure Apache can read the files
+echo "${SUDO_PASS}" | sudo -S chown -R www-data:www-data "${REPO_DIR}"
+echo "${SUDO_PASS}" | sudo -S chmod -R 755 "${REPO_DIR}"
+
+# Restart Apache to apply changes
+echo "${SUDO_PASS}" | sudo -S systemctl restart apache2
+EOF
+'''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

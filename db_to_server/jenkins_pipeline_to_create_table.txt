@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+
+    environment {
+        DB_SERVER = 'your_db_server'
+        DB_USER = 'your_db_user'
+        DB_PASS = 'your_db_password'
+        DB_HOST = 'your_db_host'
+        DB_PORT = 'your_db_port'
+        DB_NAME = 'your_db_name'
+        REPO_URL = 'https://github.com/your/repo.git'
+        REPO_BRANCH = 'main'
+        DB_SERVER_USER = 'db_server_user'
+        CREDENTIALS_ID = 'your_ssh_credentials_id'
+        REPO_DIR = '/path/to/clone/repo'
+    }
+
+    stages {
+        stage('Clone Repository and Get Changes') {
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(credentialsId: env.CREDENTIALS_ID, keyFileVariable: 'SSH_KEY')]) {
+                        // Clone or update the repository
+                        sh """
+                            ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DB_SERVER_USER}@${env.DB_SERVER} '
+                                if [ -d ${env.REPO_DIR} ]; then
+                                    cd ${env.REPO_DIR} && git pull
+                                else
+                                    git clone -b ${env.REPO_BRANCH} ${env.REPO_URL} ${env.REPO_DIR}
+                                fi
+                            '
+                        """
+
+                        // Get the list of changed files
+                        def changes = sh(script: """
+                            ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DB_SERVER_USER}@${env.DB_SERVER} '
+                                cd ${env.REPO_DIR}
+                                git fetch origin
+                                git diff --name-only HEAD~1 HEAD
+                            '
+                        """, returnStdout: true).trim().split('\n')
+
+                        env.CHANGED_FILES = changes.join(',')
+                        echo "Changed files: ${env.CHANGED_FILES}"
+                    }
+                }
+            }
+        }
+
+        stage('Update Tables for Changed Files') {
+            steps {
+                script {
+                    if (env.CHANGED_FILES) {
+                        def changedFiles = env.CHANGED_FILES.split(',')
+                        def excelFiles = changedFiles.findAll { it.endsWith('.xlsx') || it.endsWith('.xls') }
+
+                        if (excelFiles) {
+                            withCredentials([sshUserPrivateKey(credentialsId: env.CREDENTIALS_ID, keyFileVariable: 'SSH_KEY')]) {
+                                sh """
+                                    ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no ${env.DB_SERVER_USER}@${env.DB_SERVER} '
+                                        export DB_USER=${env.DB_USER}
+                                        export DB_PASS=${env.DB_PASS}
+                                        export DB_HOST=${env.DB_HOST}
+                                        export DB_PORT=${env.DB_PORT}
+                                        export DB_NAME=${env.DB_NAME}
+                                        cd ${env.REPO_DIR}
+                                        python3 create_tables.py ${excelFiles.join(' ')}
+                                    '
+                                """
+                            }
+                        } else {
+                            echo "No Excel files changed"
+                        }
+                    } else {
+                        echo "No files changed"
+                    }
+                }
+            }
+        }
+    }
+}

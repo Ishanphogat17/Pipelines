@@ -1,0 +1,115 @@
+#script with error with certbot
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = 'newdevtest.skewb.ai'
+        REMOTE_USER = 'dev'
+        SSH_CREDENTIALS_ID = 'newdevtest-ssh'
+        PAT_CREDENTIALS_ID = 'github-token'
+        SUDO_PASSWORD_ID = 'new-product-dev-password'
+        GITHUB_REPO = 'https://github.com/TripatiSkewb/New_product.git'
+        REPO_DIR = '/home/dev/New-product-backend'
+        VENV_DIR = '/home/dev/New-product-backend/venv'
+        APP_START_COMMAND = 'python3 manage.py runserver 0.0.0.0:8000'
+    }
+    stages {
+        stage('Setup and Deploy') {
+            steps {
+                script {
+                    withCredentials([
+                        sshUserPrivateKey(credentialsId: SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY'),
+                        string(credentialsId: PAT_CREDENTIALS_ID, variable: 'PAT'),
+                        usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')
+                    ]) {
+                        def remote = [:]
+                        remote.name = 'deployment-server'
+                        remote.host = env.REMOTE_HOST
+                        remote.user = env.REMOTE_USER
+                        remote.identityFile = SSH_KEY
+                        remote.allowAnyHosts = true
+                        sshCommand remote: remote, command: """
+                            set -e
+                            echo "Connected to \$(hostname) as \$(whoami)"
+                            
+                            # Function for sudo with password
+                            sudo_cmd() {
+                                echo "${SUDO_PASS}" | sudo -S \$@
+                            }
+                            # Update and install dependencies
+                            echo "Updating system and installing dependencies..."
+                            sudo_cmd apt-get update
+                            sudo_cmd apt-get install -y git python3 python3-venv python3-pip pkg-config libmysqlclient-dev python3-dev
+                            # Setup Git
+                            git config --global credential.helper store
+                            echo "https://${PAT}:@github.com" > ~/.git-credentials
+                            # Clone or update repository
+                            if [ -d "${REPO_DIR}/.git" ]; then
+                                echo "Updating existing repository..."
+                                cd "${REPO_DIR}"
+                                git fetch origin
+                                git reset --hard origin/main
+                            else
+                                echo "Cloning repository..."
+                                git clone "${GITHUB_REPO}" "${REPO_DIR}"
+                                cd "${REPO_DIR}"
+                            fi
+                            # Setup virtual environment
+                            echo "Setting up virtual environment..."
+                            python3 -m venv "${VENV_DIR}"
+                            source "${VENV_DIR}/bin/activate"
+                            # Upgrade pip and install wheel
+                            pip install --upgrade pip
+                            pip install wheel
+                            # Install project dependencies
+                            echo "Installing project dependencies..."
+                            pip install -r requirements.txt
+                            # Deactivate virtual environment
+                            deactivate
+                            echo "Setup completed successfully!"
+                        """
+                    }
+                }
+            }
+        }
+        stage('Start Application') {
+            steps {
+                script {
+                    withCredentials([
+                        sshUserPrivateKey(credentialsId: SSH_CREDENTIALS_ID, keyFileVariable: 'SSH_KEY'),
+                        usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')
+                    ]) {
+                        def remote = [:]
+                        remote.name = 'deployment-server'
+                        remote.host = env.REMOTE_HOST
+                        remote.user = env.REMOTE_USER
+                        remote.identityFile = SSH_KEY
+                        remote.allowAnyHosts = true
+                        sshCommand remote: remote, command: """
+                            set -e
+                            echo "Starting the application..."
+                            cd "${REPO_DIR}"
+                            source "${VENV_DIR}/bin/activate"
+                            # Kill any existing process running on port 8000 (adjust if using a different port)
+                            sudo_cmd() {
+                                echo "${SUDO_PASS}" | sudo -S \$@
+                            }
+                            sudo_cmd fuser -k 8000/tcp || true
+                            # Start the application in the background
+                            nohup ${APP_START_COMMAND} > app.log 2>&1 &
+                            echo "Application started. Check app.log for output."
+                            deactivate
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

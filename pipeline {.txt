@@ -1,0 +1,44 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_HOST = '3.109.188.102'  // Replace with your Ubuntu server's IP or hostname
+        REMOTE_USER = 'ubuntu'         // Replace with your remote username
+        SSH_CREDENTIALS = 'ubuntu-server-ssh-key'  // ID of your SSH credentials in Jenkins
+    }
+
+    stages {
+        stage('Connect to Ubuntu Server') {
+            steps {
+                script {
+                    sshagent(credentials: [SSH_CREDENTIALS]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                                echo "Successfully connected to Ubuntu server"
+                                echo "Hostname: \$(hostname)"
+                                echo "Current user: \$(whoami)"
+                                echo "Current directory: \$(pwd)"
+                                echo "Linux distribution:"
+                                lsb_release -a
+                                echo "System uptime:"
+                                uptime
+                                echo "Disk usage:"
+                                df -h
+                            '
+                        """
+                    }
+                    echo "SSH connection and command execution successful"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

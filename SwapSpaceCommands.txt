@@ -1,0 +1,20 @@
+#This will create 2Gb swap space
+sudo fallocate -l 2G /swapfile
+
+#Change the permission of the swap file so that root user can read and write it
+sudo chmod 600 /swapfile
+
+#Format the file as swap space
+sudo mkswap /swapfile
+
+#activate the swap file 
+sudo swapon /swapfile
+
+#Making the swap file available after a reebot 
+sudo vim /etc/fstab
+
+#Add this line at the end of the above file 
+/swapfile none swap sw 0 0
+
+
+

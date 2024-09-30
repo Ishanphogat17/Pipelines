@@ -1,0 +1,27 @@
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost
+    DocumentRoot /usr/local/apache2/htdocs/
+
+    # Proxy settings to handle API requests (if any)
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    # Enable proxy and proxy_http modules
+    <IfModule mod_proxy.c>
+        # Assuming API requests are directed to '/api' path
+        ProxyPass /api http://backend-container:8000/
+        ProxyPassReverse /api http://backend-container:8000/
+    </IfModule>
+
+    # Handling CORS for API requests (optional, if needed)
+    <Location /api>
+        Header set Access-Control-Allow-Origin "*"
+        Header set Access-Control-Allow-Methods "GET,POST,OPTIONS,DELETE,PUT"
+        Header set Access-Control-Allow-Headers "Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With"
+    </Location>
+
+    # Error handling (optional)
+    ErrorLog ${APACHE_LOG_DIR}/error.log
+    CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+</VirtualHost>

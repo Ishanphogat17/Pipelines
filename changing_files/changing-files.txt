@@ -1,0 +1,79 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_HOST = '3.109.188.102'  // Replace with your Ubuntu server's IP or hostname
+        REMOTE_USER = 'ishan'           // Replace with your remote username
+        CREDENTIALS_ID = 'jenkins-ssh'  // Replace with the ID of your SSH credentials in Jenkins
+        GITHUB_REPO = 'https://github.com/Ishansk17/project_chat_application.git'  // Replace with your GitHub repo URL
+        REPO_DIR = '/home/ishan/frontend'  // Replace with the directory where you want to clone the repo
+    }
+
+    stages {
+        stage('Checkout Repository') {
+            steps {
+                script {
+                    // Check if the repository is already present
+                    if (fileExists('.git')) {
+                        // If the repo is already present, pull the latest changes
+                        sh 'git pull origin master'
+                    } else {
+                        // If the repo is not present, clone it
+                        git url: GITHUB_REPO
+                    }
+                }
+            }
+        }
+
+        stage('Connect to Ubuntu Server') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        sh """
+                            sshpass -p "\$PASSWORD" ssh -o StrictHostKeyChecking=no \$USERNAME@\$REMOTE_HOST '
+                                echo "Successfully connected to Ubuntu server"
+                                echo "Hostname: \$(hostname)"
+                                echo "Current user: \$(whoami)"
+                                echo "Current directory: \$(pwd)"
+                            '
+                        """
+                    }
+                    echo "SSH connection to the server was successful"
+                }
+            }
+        }
+
+        stage('Sync Changed Files') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        sh """
+                            git fetch
+                            CHANGED_FILES=\$(git diff --name-only FETCH_HEAD HEAD)
+                            
+                            for FILE in \$CHANGED_FILES; do
+                                if [ -f \$FILE ]; then
+                                    echo "Syncing changed file: \$FILE"
+                                    scp -o StrictHostKeyChecking=no \$FILE \$USERNAME@\$REMOTE_HOST:${REPO_DIR}/\$FILE
+                                else
+                                    echo "File not found: \$FILE"
+                                    scp -o StrictHostKeyChecking=no \$FILE \$USERNAME@\$REMOTE_HOST:${REPO_DIR}/\$FILE
+                                fi
+                            done
+                        """
+                    }
+                    echo "Files synchronized successfully"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

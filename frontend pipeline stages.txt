@@ -1,0 +1,87 @@
+        stage('Setup and Deploy') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: PAT_CREDENTIALS_ID, variable: 'PAT'),
+                        usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')
+                    ]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} <<EOF
+set -e
+echo "Connected to \$(hostname) as \$(whoami)"
+# Run commands as sudo with the password
+if [ -d "${REPO_DIR}" ]; then
+   echo "repo already exists"
+else
+   echo "Directory does not exist. Creating and cloning repository..."
+   echo "${SUDO_PASS}" | sudo -S mkdir -p "${REPO_DIR}"
+fi
+if [ -d "${REPO_DIR}" ]; then
+    echo "${SUDO_PASS}" | sudo -S chown -R ${REMOTE_USER}:${REMOTE_USER} "${REPO_DIR}"
+fi
+# Setup Git
+git config --global credential.helper store
+echo "https://${PAT}:@github.com" > ~/.git-credentials
+# Clone or update repository
+if [ -d "${REPO_DIR}/.git" ]; then
+    echo "Updating existing repository..."
+    cd "${REPO_DIR}"
+    git fetch origin
+    git reset --hard origin/${BRANCH_NAME}
+else
+    echo "Cloning repository..."
+    git clone -b "${BRANCH_NAME}" "${GITHUB_REPO}" "${REPO_DIR}"
+    cd "${REPO_DIR}"
+fi
+EOF
+'''
+                    }
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+set -e
+# Check if npm is installed
+if ! command -v npm &> /dev/null; then
+    echo "npm not found, installing Node.js and npm..."
+    echo "${SUDO_PASS}" | sudo -S bash -c 'curl -sL https://deb.nodesource.com/setup_20.x | bash -'
+    echo "${SUDO_PASS}" | sudo -S apt-get install -y nodejs
+fi
+cd "${REPO_DIR}"
+# Install dependencies (example for Node.js project)
+if [ -f "package.json" ]; then
+    echo "Installing Node.js dependencies..."
+    npm install
+fi
+EOF
+'''
+                    }
+                }
+            }
+        }
+        stage('Build Project') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SUDO_PASSWORD_ID, usernameVariable: 'SUDO_USER', passwordVariable: 'SUDO_PASS')]) {
+                        sh '''
+                            sshpass -p "${SUDO_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+set -e
+cd "${REPO_DIR}"
+# Build project (example for Node.js project)
+if [ -f "package.json" ]; then
+    echo "Building Node.js project..."
+    export REACT_APP_CLIENT_ID="${REACT_APP_CLIENT_ID}"
+    npm run build
+fi
+EOF
+'''
+                    }
+                }
+            }
+        }
+commands for frontend pipeline

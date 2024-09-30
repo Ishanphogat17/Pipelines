@@ -1,0 +1,71 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_HOST = '3.109.188.102'  // Replace with your Ubuntu server's IP or hostname
+        REMOTE_USER = 'ishan'         // Replace with your remote username
+        CREDENTIALS_ID = 'jenkins-ssh'  // ID of your username/password credentials in Jenkins
+        PAT_CREDENTIALS_ID = 'github-token' // ID of your PAT credentials in Jenkins
+        GITHUB_REPO = 'https://github.com/Ishansk17/simpleui.git'  // Replace with your GitHub repo URL
+        REPO_DIR = '/home/ubuntu/backend'  // Replace with the directory where you want to clone the repo
+    }
+
+    stages {
+        stage('Connect to Ubuntu Server and Clone Repo') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        withCredentials([string(credentialsId: PAT_CREDENTIALS_ID, variable: 'PAT')]) {
+                            sh """
+                                sshpass -p "\$PASSWORD" ssh -o StrictHostKeyChecking=no \$USERNAME@\$REMOTE_HOST '
+                                    echo "Successfully connected to Ubuntu server"
+                                    echo "Hostname: \$(hostname)"
+                                    echo "Current user: \$(whoami)"
+                                    echo "Current directory: \$(pwd)"
+                                    
+                                    # Check if Git is installed
+                                    if ! command -v git &> /dev/null; then
+                                        echo "Git is not installed. Installing Git..."
+                                        sudo apt-get update
+                                        sudo apt-get install -y git
+                                    fi
+                                    
+                                    # Setup Git configuration to use PAT
+                                    git config --global credential.helper store
+                                    echo "https://\$PAT:@github.com" > ~/.git-credentials
+
+                                    # Clone or update the repository
+                                    if [ -d "${REPO_DIR}" ]; then
+                                        echo "Repository directory exists. Pulling latest changes..."
+                                        cd "${REPO_DIR}"
+                                        git pull
+                                    else
+                                        echo "Cloning the repository..."
+                                        git clone ${GITHUB_REPO} ${REPO_DIR}
+                                    fi
+                                    
+                                    echo "Repository status:"
+                                    cd "${REPO_DIR}"
+                                    git status
+                                    
+                                    echo "List of files in the repository:"
+                                    ls -la
+                                '
+                            """
+                        }
+                        echo "SSH connection, command execution, and repo cloning/updating successful"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}

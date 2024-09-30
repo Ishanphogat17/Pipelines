@@ -1,0 +1,31 @@
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = '3.109.188.102' // Replace with your remote server IP
+        REMOTE_USER = 'ishan' // Replace with your remote server username
+        CREDENTIALS_ID = 'jenkins-ssh' // Replace with your Jenkins credentials ID
+        REMOTE_DIR = "/home/ishan/frontend3" // Use absolute path
+    }
+    stages {
+        stage('Create Directory on Remote Server') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASSWORD')]) {
+                        sh """
+                            echo "Attempting to create directory: \$REMOTE_DIR"
+                            sshpass -p \$PASSWORD ssh -o StrictHostKeyChecking=no \$USER@\$REMOTE_HOST "mkdir -p \$REMOTE_DIR"
+                        """
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Directory created successfully on remote server."
+        }
+        failure {
+            echo "Failed to create directory on remote server."
+        }
+    }
+}

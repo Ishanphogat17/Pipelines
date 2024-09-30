@@ -1,0 +1,37 @@
+import pandas as pd
+import sqlalchemy
+import os
+import sys
+
+def process_file(file_path, engine):
+    if os.path.exists(file_path) and (file_path.endswith('.xlsx') or file_path.endswith('.xls')):
+        # Read the Excel file into a DataFrame
+        df = pd.read_excel(file_path)
+        
+        # Create table name by removing the file extension
+        table_name = os.path.splitext(os.path.basename(file_path))[0]
+        
+        # Write the DataFrame to a SQL table
+        df.to_sql(table_name, engine, if_exists='replace', index=False)
+        print(f"Table '{table_name}' created/updated successfully from file '{file_path}'")
+    else:
+        print(f"File '{file_path}' does not exist or is not an Excel file")
+
+def main():
+    DB_USER = os.environ['DB_USER']
+    DB_PASS = os.environ['DB_PASS']
+    DB_HOST = os.environ['DB_HOST']
+    DB_PORT = os.environ['DB_PORT']
+    DB_NAME = os.environ['DB_NAME']
+
+    # Create a connection to the database
+    engine = sqlalchemy.create_engine(f'postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}')
+    
+    # Get the list of files to process from command-line arguments
+    files_to_process = sys.argv[1:]
+    
+    for filename in files_to_process:
+        process_file(filename, engine)
+
+if __name__ == '__main__':
+    main()

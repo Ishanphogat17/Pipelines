@@ -1,0 +1,148 @@
+pipeline {
+    agent any
+    environment {
+        REMOTE_HOST = '3.109.188.102'
+        REMOTE_USER = 'ishan'
+        SSH_CREDENTIALS_ID = 'jenkins-ssh'
+        PAT_CREDENTIALS_ID = 'github-token'
+        GITHUB_REPO = 'https://github.com/Ishansk17/for_test.git'
+        REPO_DIR = '/home/ishan/frontend4'
+        ITEMS_TO_CHECK = ".,..,.git,1st,file1.txt,folder"  // List of files and folders to check
+    }
+    stages {
+        stage('Create Directory') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SSH_CREDENTIALS_ID, usernameVariable: 'SSH_USER', passwordVariable: 'SSH_PASS')]) {
+                        sh """
+                            sshpass -p "\${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+                                set -e
+                                echo "Successfully connected to Ubuntu server"
+                                echo "Hostname: \$(hostname)"
+                                echo "Current user: \$(whoami)"
+                                echo "Current directory: \$(pwd)"
+                                
+                                # Create directory if it doesn't exist
+                                echo "Attempting to create directory: ${REPO_DIR}"
+                                mkdir -p "${REPO_DIR}"
+                                
+                                # Check if Git is installed
+                                if ! command -v git &> /dev/null; then
+                                    echo "Git is not installed. Installing Git..."
+                                    sudo apt-get update
+                                    sudo apt-get install -y git
+                                fi
+EOF
+                        """
+                    }
+                    echo "Directory creation and Git installation check completed"
+                }
+            }
+        }
+        
+        stage('Clone GitHub Repository') {
+            steps {
+                script {
+                    withCredentials([
+                        usernamePassword(credentialsId: SSH_CREDENTIALS_ID, usernameVariable: 'SSH_USER', passwordVariable: 'SSH_PASS'),
+                        string(credentialsId: PAT_CREDENTIALS_ID, variable: 'PAT')
+                    ]) {
+                        sh """
+                            sshpass -p "\${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} << EOF
+                                set -e
+                                # Setup Git configuration to use PAT
+                                git config --global credential.helper store
+                                echo "https://${PAT}:@github.com" > ~/.git-credentials
+                                
+                                # Check if REPO_DIR is a git repository
+                                if [ -d "${REPO_DIR}/.git" ]; then
+                                    echo "Repository exists. Updating..."
+                                    cd "${REPO_DIR}"
+                                    git fetch origin
+                                    git reset --hard origin/main  # Assuming 'main' is your default branch
+                                else
+                                    echo "Repository doesn't exist or is not a git repository. Cloning..."
+                                    rm -rf "${REPO_DIR}"/*  # Remove contents if directory exists but is not a git repo
+                                    git clone ${GITHUB_REPO} ${REPO_DIR}
+                                    cd "${REPO_DIR}"
+                                fi
+                                
+                                echo "Repository status:"
+                                git status
+                                
+                                echo "List of files in the repository:"
+                                ls -la
+EOF
+                        """
+                    }
+                    echo "Repository cloning/updating successful"
+                }
+            }
+        }
+        
+        stage('Check Expected and Unexpected Items') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: SSH_CREDENTIALS_ID, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                        def items = env.ITEMS_TO_CHECK.split(',')
+                        def missingItems = []
+                        def unexpectedItems = []
+                        
+                        def sshCommand = """
+                            cd ${env.REPO_DIR}
+                            
+                            # Check for expected items
+                            for item in ${items.join(' ')}; do
+                                if [ ! -e "\$item" ]; then
+                                    echo "MISSING:\$item"
+                                fi
+                            done
+                            
+                            # List all items for unexpected check
+                            find . -print
+                        """
+                        
+                        def sshOutput = sh(script: "sshpass -p \"\$PASSWORD\" ssh -o StrictHostKeyChecking=no \$REMOTE_USER@\$REMOTE_HOST '$sshCommand'", returnStdout: true).trim()
+                        
+                        echo "SSH Output:"
+                        echo sshOutput
+                        
+                        def outputLines = sshOutput.split('\n')
+                        def allItems = []
+                        
+                        outputLines.each { line ->
+                            if (line.startsWith("MISSING:")) {
+                                missingItems << line.substring(8)
+                            } else if (line.startsWith("./")) {
+                                allItems << line.substring(2)
+                            }
+                        }
+                        
+                        def allExpectedItems = items + ['.']
+                        allItems.each { item ->
+                            if (!(allExpectedItems.any { expected -> item == expected || item.startsWith("${expected}/") })) {
+                                unexpectedItems << item
+                            }
+                        }
+                        
+                        if (missingItems) {
+                            error "Missing items: ${missingItems.join(', ')}"
+                        } else if (unexpectedItems) {
+                            error "Unexpected items found: ${unexpectedItems.join(', ')}"
+                        } else {
+                            echo "All expected items are present. No unexpected items found."
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Pipeline executed successfully"
+        }
+        failure {
+            echo "Pipeline execution failed"
+        }
+    }
+}
